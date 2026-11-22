@@ -54,3 +54,13 @@ src/*.o
 src/*.so
 src/*.dll
 data/raw/
+
+# large cached matrices (regenerate with load_cancer())
+data/processed/*.rds
+
+# TCGAbiolinks byproducts
+MANIFEST.txt
+results.rds
+df.rds
+data/processed/*.csv.gz
+data/processed/*.csv
