@@ -1,29 +1,37 @@
 # Download, label, filter and normalize TCGA expression data.
 
-suppressPackageStartupMessages({
-  library(TCGAbiolinks)
-  library(SummarizedExperiment)
-  library(edgeR)
-})
+suppressPackageStartupMessages(library(edgeR))
 
 RAW_DIR       <- file.path("data", "raw")
 PROCESSED_DIR <- file.path("data", "processed")
+SAMPLE_DIR    <- file.path("data", "sample")
+
+# Only the full TCGA download needs these packages; the committed sample does not.
+require_bioc <- function() {
+  for (pkg in c("TCGAbiolinks", "SummarizedExperiment")) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      stop("Package '", pkg, "' is required for the full TCGA download: ",
+           "BiocManager::install(\"", pkg, "\")")
+    }
+  }
+}
 
 download_tcga <- function(project, raw_dir = RAW_DIR) {
+  require_bioc()
   dir.create(raw_dir, recursive = TRUE, showWarnings = FALSE)
 
-  query <- GDCquery(
+  query <- TCGAbiolinks::GDCquery(
     project       = project,
     data.category = "Transcriptome Profiling",
     data.type     = "Gene Expression Quantification",
     workflow.type = "STAR - Counts"
   )
-  GDCdownload(query, directory = raw_dir)
-  GDCprepare(query, directory = raw_dir)
+  TCGAbiolinks::GDCdownload(query, directory = raw_dir)
+  TCGAbiolinks::GDCprepare(query, directory = raw_dir)
 }
 
 label_samples <- function(se) {
-  meta <- as.data.frame(colData(se))
+  meta <- as.data.frame(SummarizedExperiment::colData(se))
 
   group <- rep(NA_character_, nrow(meta))
   group[meta$sample_type == "Primary Tumor"]       <- "tumor"
@@ -34,14 +42,13 @@ label_samples <- function(se) {
   keep <- !is.na(group) & !duplicated(paste(patient, group))
 
   se <- se[, keep]
-  group <- factor(group[keep], levels = c("normal", "tumor"))
-  colData(se)$group <- group
+  se$group <- factor(group[keep], levels = c("normal", "tumor"))
   se
 }
 
 extract_counts <- function(se, protein_coding_only = TRUE) {
-  counts <- assay(se, "unstranded")
-  info   <- as.data.frame(rowData(se))[, c("gene_id", "gene_name", "gene_type")]
+  counts <- SummarizedExperiment::assay(se, "unstranded")
+  info   <- as.data.frame(SummarizedExperiment::rowData(se))[, c("gene_id", "gene_name", "gene_type")]
   rownames(info) <- info$gene_id
 
   if (protein_coding_only) {
@@ -66,7 +73,8 @@ normalize_log_cpm <- function(counts, group) {
   cpm(dge, log = TRUE, prior.count = 1)
 }
 
-# Returns list(project, counts, logcpm, group, genes); cached in data/processed/.
+# Full TCGA download. Returns list(project, counts, logcpm, group, genes);
+# cached in data/processed/.
 load_cancer <- function(project, force = FALSE) {
   cache <- file.path(PROCESSED_DIR, paste0(project, ".rds"))
   if (file.exists(cache) && !force) {
@@ -100,6 +108,58 @@ load_cancer <- function(project, force = FALSE) {
   dir.create(PROCESSED_DIR, recursive = TRUE, showWarnings = FALSE)
   saveRDS(out, cache)
   out
+}
+
+# All normals plus a seeded random subset of tumors, small enough to commit.
+make_sample <- function(data, n_tumor = 150, seed = 123) {
+  set.seed(seed)
+  tumors <- which(data$group == "tumor")
+  keep <- sort(c(which(data$group == "normal"),
+                 sample(tumors, min(n_tumor, length(tumors)))))
+
+  list(project = data$project,
+       counts  = data$counts[, keep],
+       group   = data$group[keep],
+       genes   = data$genes)
+}
+
+# Writes <project>_counts.csv.gz, <project>_groups.csv, <project>_genes.csv.
+write_sample <- function(sample, dir = SAMPLE_DIR) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  p <- sample$project
+
+  con <- gzfile(file.path(dir, paste0(p, "_counts.csv.gz")), "w")
+  write.csv(sample$counts, con, quote = FALSE)
+  close(con)
+
+  write.csv(data.frame(sample_id = colnames(sample$counts),
+                       group     = as.character(sample$group)),
+            file.path(dir, paste0(p, "_groups.csv")),
+            row.names = FALSE, quote = FALSE)
+
+  write.csv(sample$genes[, c("gene_id", "gene_name", "gene_type")],
+            file.path(dir, paste0(p, "_genes.csv")),
+            row.names = FALSE)
+}
+
+# Same return shape as load_cancer(), built from the committed sample.
+load_sample <- function(project, dir = SAMPLE_DIR) {
+  counts <- as.matrix(read.csv(file.path(dir, paste0(project, "_counts.csv.gz")),
+                               row.names = 1, check.names = FALSE))
+  groups <- read.csv(file.path(dir, paste0(project, "_groups.csv")))
+  genes  <- read.csv(file.path(dir, paste0(project, "_genes.csv")),
+                     row.names = NULL)
+  rownames(genes) <- genes$gene_id
+
+  group <- factor(groups$group[match(colnames(counts), groups$sample_id)],
+                  levels = c("normal", "tumor"))
+  stopifnot(!anyNA(group), setequal(rownames(counts), genes$gene_id))
+
+  list(project = project,
+       counts  = counts,
+       logcpm  = normalize_log_cpm(counts, group),
+       group   = group,
+       genes   = genes[rownames(counts), ])
 }
 
 # Plain-text copy of a loaded dataset for python/dgea.py:
