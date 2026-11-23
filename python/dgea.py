@@ -483,11 +483,7 @@ def compare_with_deseq2(welch_results, project):
 
     deseq2 = pd.read_csv(deseq2_path)
 
-    print("DESeq2 columns:")
-    print(deseq2.columns.tolist())
-    print(deseq2.head())
-
-    # Make sure gene IDs have the same data type.
+    # Make gene IDs strings in both tables
     deseq2["gene_id"] = deseq2["gene_id"].astype(str)
 
     welch_results = welch_results.copy()
@@ -495,27 +491,21 @@ def compare_with_deseq2(welch_results, project):
         welch_results["gene_id"].astype(str)
     )
 
+    # -----------------------------
+    # Rename columns
+    # -----------------------------
 
-    # ----------------
-    # Prepare DESeq2 columns
-    # ----------------
-
-    # DESeq2 normally calls these columns:
-    #
-    # log2FoldChange
-    # pvalue
-    # padj
-    #
-    # Rename them so it is obvious which method they came from.
+    # Rename DESeq2 columns
     deseq2 = deseq2.rename(
-    columns={
-        "log2FoldChange": "log2FC_deseq2",
-        "pvalue": "p_value_deseq2",
-        "padj": "padj_deseq2"
-    }
-)
+        columns={
+            "log2FC": "log2FC_deseq2",
+            "p_value": "p_value_deseq2",
+            "padj": "padj_deseq2",
+            "status": "status_deseq2"
+        }
+    )
 
-    # Rename the corresponding Welch columns.
+    # Rename Welch columns
     welch = welch_results.rename(
         columns={
             "log2FC": "log2FC_welch",
@@ -525,25 +515,27 @@ def compare_with_deseq2(welch_results, project):
         }
     )
 
+    # Debugging check
+    print("\nDESeq2 columns after renaming:")
+    print(deseq2.columns.tolist())
+
+    print("\nWelch columns after renaming:")
+    print(welch.columns.tolist())
 
     # -----------------------------
-    # Merge results by gene
+    # Merge by gene ID
     # -----------------------------
 
-    # Only genes found in both analyses are compared.
     comparison = welch.merge(
         deseq2[
             [
                 "gene_id",
                 "log2FC_deseq2",
                 "p_value_deseq2",
-                "padj_deseq2"
+                "padj_deseq2",
+                "status_deseq2"
             ]
         ],
-        on="gene_id",
-        how="inner"
-    )
-
     # Remove genes without usable fold-change estimates.
     comparison = comparison[
         np.isfinite(comparison["log2FC_welch"]) &
