@@ -1,8 +1,11 @@
 # Run from the project root.
-#   Rscript run_all.R         uses the committed sample in data/sample/
-#   Rscript run_all.R --full  downloads full TCGA data (~10 GB), rebuilds the sample
+#   Rscript run_all.R                  BRCA and LUAD from the committed sample
+#   Rscript run_all.R TCGA-COAD ...    any TCGA project (or your own dataset in
+#                                      data/sample/, see README); downloads and
+#                                      samples it first if no sample exists
+#   Rscript run_all.R --full           rebuild the sample(s) from TCGA (~10 GB each)
 # Writes the CSV files that python/dgea.py reads to data/processed/, plus the
-# DESeq2 table and volcano plot for each cancer to results/.
+# DESeq2 table and volcano plot for each project to results/.
 
 if (!file.exists(file.path("R", "load_data.R"))) {
   stop("Run this script from the project root.")
@@ -12,16 +15,17 @@ source(file.path("R", "load_data.R"))
 source(file.path("R", "deseq2.R"))
 source(file.path("R", "plots.R"))
 
-PROJECTS <- c("TCGA-BRCA", "TCGA-LUAD")
-full <- "--full" %in% commandArgs(trailingOnly = TRUE)
+args <- commandArgs(trailingOnly = TRUE)
+full <- "--full" %in% args
+projects <- setdiff(args, "--full")
+if (length(projects) == 0) projects <- c("TCGA-BRCA", "TCGA-LUAD")
 
-for (project in PROJECTS) {
-  if (full) {
-    data <- load_cancer(project)
-    write_sample(make_sample(data))
-  } else {
-    data <- load_sample(project)
+for (project in projects) {
+  has_sample <- file.exists(file.path(SAMPLE_DIR, paste0(project, "_counts.csv.gz")))
+  if (full || !has_sample) {
+    write_sample(make_sample(load_cancer(project)))
   }
+  data <- load_sample(project)
   export_for_python(data)
 
   res <- run_deseq2(data)

@@ -91,7 +91,11 @@ load_cancer <- function(project, force = FALSE) {
   genes  <- parts$genes[rownames(counts), ]
 
   stopifnot(identical(colnames(counts), colnames(se)))
-  stopifnot(!anyNA(group), nlevels(group) == 2)
+  if (min(table(group)) < 3) {
+    stop(project, " has fewer than 3 samples in one group (",
+         paste(names(table(group)), table(group), collapse = ", "),
+         "); a tumor vs. normal comparison is not possible.")
+  }
 
   message("[", project, "] ", table(group)[["tumor"]], " tumor, ",
           table(group)[["normal"]], " normal samples; ",
@@ -149,11 +153,17 @@ load_sample <- function(project, dir = SAMPLE_DIR) {
   groups <- read.csv(file.path(dir, paste0(project, "_groups.csv")))
   genes  <- read.csv(file.path(dir, paste0(project, "_genes.csv")),
                      row.names = NULL)
+  if (!"gene_name" %in% names(genes)) genes$gene_name <- genes$gene_id
+  if (!"gene_type" %in% names(genes)) genes$gene_type <- "unknown"
   rownames(genes) <- genes$gene_id
 
   group <- factor(groups$group[match(colnames(counts), groups$sample_id)],
                   levels = c("normal", "tumor"))
-  stopifnot(!anyNA(group), setequal(rownames(counts), genes$gene_id))
+  if (anyNA(group)) {
+    stop("Every sample in ", project, "_counts.csv.gz needs a 'tumor' or ",
+         "'normal' label in ", project, "_groups.csv.")
+  }
+  stopifnot(setequal(rownames(counts), genes$gene_id))
 
   list(project = project,
        counts  = counts,
