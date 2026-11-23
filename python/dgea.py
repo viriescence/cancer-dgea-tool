@@ -49,6 +49,9 @@ from statsmodels.stats.multitest import multipletests
 # File locations
 # -------------------
 
+# Raw count data used as input for DESeq2
+SAMPLE_DIR = Path("data") / "sample"
+
 # the analysis ready files from the R pre processing
 PROCESSED_DIR = Path("data") / "processed"
 
@@ -475,7 +478,7 @@ def compare_with_deseq2(welch_results, project):
     # Change this path if your DESeq2 results are stored elsewhere
     deseq2_path = (
         TABLES_DIR /
-        f"{project}_DESeq2_results.csv"
+        f"{project}_deseq2.csv"
     )
 
     deseq2 = pd.read_csv(deseq2_path)
