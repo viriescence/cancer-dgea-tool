@@ -15,19 +15,24 @@ source(file.path("R", "load_data.R"))
 source(file.path("R", "deseq2.R"))
 source(file.path("R", "plots.R"))
 
+# Command-line options: --full, plus any project names. Default is BRCA and LUAD.
 args <- commandArgs(trailingOnly = TRUE)
 full <- "--full" %in% args
 projects <- setdiff(args, "--full")
 if (length(projects) == 0) projects <- c("TCGA-BRCA", "TCGA-LUAD")
 
 for (project in projects) {
+  # Download and sample only when asked or when no sample exists yet.
   has_sample <- file.exists(file.path(SAMPLE_DIR, paste0(project, "_counts.csv.gz")))
   if (full || !has_sample) {
     write_sample(make_sample(load_cancer(project)))
   }
+
+  # Everything below runs on the committed sample, so results are the same everywhere.
   data <- load_sample(project)
   export_for_python(data)
 
+  # DESeq2 table and volcano plot.
   res <- run_deseq2(data)
   dir.create(file.path("results", "tables"), recursive = TRUE, showWarnings = FALSE)
   write.csv(res, file.path("results", "tables", paste0(project, "_deseq2.csv")),

@@ -16,6 +16,7 @@ require_bioc <- function() {
   }
 }
 
+# Query the GDC for raw STAR counts of one TCGA project and load them into R.
 download_tcga <- function(project, raw_dir = RAW_DIR) {
   require_bioc()
   dir.create(raw_dir, recursive = TRUE, showWarnings = FALSE)
@@ -30,9 +31,11 @@ download_tcga <- function(project, raw_dir = RAW_DIR) {
   TCGAbiolinks::GDCprepare(query, directory = raw_dir)
 }
 
+# Label each sample tumor or normal and drop everything else.
 label_samples <- function(se) {
   meta <- as.data.frame(SummarizedExperiment::colData(se))
 
+  # Only primary tumors and solid-tissue normals are compared; the rest become NA.
   group <- rep(NA_character_, nrow(meta))
   group[meta$sample_type == "Primary Tumor"]       <- "tumor"
   group[meta$sample_type == "Solid Tissue Normal"] <- "normal"
@@ -46,11 +49,13 @@ label_samples <- function(se) {
   se
 }
 
+# Pull the raw count matrix and gene annotation out of the TCGA object.
 extract_counts <- function(se, protein_coding_only = TRUE) {
   counts <- SummarizedExperiment::assay(se, "unstranded")
   info   <- as.data.frame(SummarizedExperiment::rowData(se))[, c("gene_id", "gene_name", "gene_type")]
   rownames(info) <- info$gene_id
 
+  # Non-coding genes are mostly low and noisy, so keep protein-coding only.
   if (protein_coding_only) {
     pc <- info$gene_type == "protein_coding"
     counts <- counts[pc, , drop = FALSE]
@@ -60,6 +65,7 @@ extract_counts <- function(se, protein_coding_only = TRUE) {
 }
 
 # Keep genes with CPM > min_cpm in at least as many samples as the smallest group.
+# CPM (counts per million) adjusts for library size, so samples are comparable.
 filter_low_expression <- function(counts, group, min_cpm = 1) {
   min_samples <- min(table(group))
   keep <- rowSums(cpm(counts) > min_cpm) >= min_samples
@@ -67,6 +73,8 @@ filter_low_expression <- function(counts, group, min_cpm = 1) {
 }
 
 # TMM-normalized log2 CPM.
+# TMM corrects for differences in overall composition between samples; the
+# log2 and prior.count = 1 keep zeros finite and the values roughly symmetric.
 normalize_log_cpm <- function(counts, group) {
   dge <- DGEList(counts = counts, group = group)
   dge <- calcNormFactors(dge, method = "TMM")
@@ -74,7 +82,7 @@ normalize_log_cpm <- function(counts, group) {
 }
 
 # Full TCGA download. Returns list(project, counts, logcpm, group, genes);
-# cached in data/processed/.
+# cached in data/processed/ because the download and prepare steps are slow.
 load_cancer <- function(project, force = FALSE) {
   cache <- file.path(PROCESSED_DIR, paste0(project, ".rds"))
   if (file.exists(cache) && !force) {
@@ -82,6 +90,7 @@ load_cancer <- function(project, force = FALSE) {
     return(readRDS(cache))
   }
 
+  # Download, label samples, then keep protein-coding genes.
   message("[", project, "] downloading / loading raw counts ...")
   se <- label_samples(download_tcga(project))
 
@@ -90,6 +99,7 @@ load_cancer <- function(project, force = FALSE) {
   counts <- filter_low_expression(parts$counts, group)
   genes  <- parts$genes[rownames(counts), ]
 
+  # Sanity checks: columns still match the labels, and both groups are big enough.
   stopifnot(identical(colnames(counts), colnames(se)))
   if (min(table(group)) < 3) {
     stop(project, " has fewer than 3 samples in one group (",
@@ -115,6 +125,7 @@ load_cancer <- function(project, force = FALSE) {
 }
 
 # All normals plus a seeded random subset of tumors, small enough to commit.
+# The fixed seed makes the same tumors get picked on every run.
 make_sample <- function(data, n_tumor = 150, seed = 123) {
   set.seed(seed)
   tumors <- which(data$group == "tumor")
@@ -128,35 +139,42 @@ make_sample <- function(data, n_tumor = 150, seed = 123) {
 }
 
 # Writes <project>_counts.csv.gz, <project>_groups.csv, <project>_genes.csv.
+# This three-file format is also how a custom dataset is supplied.
 write_sample <- function(sample, dir = SAMPLE_DIR) {
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
   p <- sample$project
 
+  # Raw counts, genes x samples, gzip-compressed to stay small.
   con <- gzfile(file.path(dir, paste0(p, "_counts.csv.gz")), "w")
   write.csv(sample$counts, con, quote = FALSE)
   close(con)
 
+  # Which sample is tumor and which is normal.
   write.csv(data.frame(sample_id = colnames(sample$counts),
                        group     = as.character(sample$group)),
             file.path(dir, paste0(p, "_groups.csv")),
             row.names = FALSE, quote = FALSE)
 
+  # Gene IDs with readable names and types.
   write.csv(sample$genes[, c("gene_id", "gene_name", "gene_type")],
             file.path(dir, paste0(p, "_genes.csv")),
             row.names = FALSE)
 }
 
 # Same return shape as load_cancer(), built from the committed sample.
+# No TCGAbiolinks needed, so anyone can run it straight from a clone.
 load_sample <- function(project, dir = SAMPLE_DIR) {
   counts <- as.matrix(read.csv(file.path(dir, paste0(project, "_counts.csv.gz")),
                                row.names = 1, check.names = FALSE))
   groups <- read.csv(file.path(dir, paste0(project, "_groups.csv")))
   genes  <- read.csv(file.path(dir, paste0(project, "_genes.csv")),
                      row.names = NULL)
+  # Custom datasets may only have gene IDs, so fill in the optional columns.
   if (!"gene_name" %in% names(genes)) genes$gene_name <- genes$gene_id
   if (!"gene_type" %in% names(genes)) genes$gene_type <- "unknown"
   rownames(genes) <- genes$gene_id
 
+  # Match labels to count columns by sample ID, since file order can differ.
   group <- factor(groups$group[match(colnames(counts), groups$sample_id)],
                   levels = c("normal", "tumor"))
   if (anyNA(group)) {
@@ -174,10 +192,12 @@ load_sample <- function(project, dir = SAMPLE_DIR) {
 
 # Plain-text copy of a loaded dataset for python/dgea.py:
 # <project>_logcpm.csv.gz, <project>_groups.csv, <project>_genes.csv
+# Python reads these CSVs, which is how R hands the data over.
 export_for_python <- function(data, out_dir = PROCESSED_DIR) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   p <- data$project
 
+  # Rounded to 4 decimals to keep the file small; the precision is more than enough.
   con <- gzfile(file.path(out_dir, paste0(p, "_logcpm.csv.gz")), "w")
   write.csv(round(data$logcpm, 4), con, quote = FALSE)
   close(con)

@@ -2,11 +2,14 @@
 
 save_volcano <- function(res, path, title, top_n = 10,
                          lfc_cutoff = 1, fdr_cutoff = 0.05) {
+  # y axis is -log10(padj); the floor stops very small p-values becoming Inf.
   res <- res[!is.na(res$padj), ]
   res$neg_log10_padj <- -log10(pmax(res$padj, 1e-300))
 
+  # Label the most significant up and down genes (res is already sorted by padj).
   labelled <- head(res[res$status != "ns", ], top_n * 2)
 
+  # Points coloured by status, with dashed lines at the thresholds.
   p <- ggplot2::ggplot(res, ggplot2::aes(log2FC, neg_log10_padj, colour = status)) +
     ggplot2::geom_point(size = 0.8, alpha = 0.6) +
     ggplot2::geom_vline(xintercept = c(-lfc_cutoff, lfc_cutoff), linetype = "dashed") +

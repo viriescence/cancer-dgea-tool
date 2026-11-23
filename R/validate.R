@@ -8,6 +8,9 @@ load_known_genes <- function(path = KNOWN_GENES_FILE) {
 }
 
 # res: ranked table with gene_name, log2FC, padj, status (DESeq2 or Python).
+# Two questions, each tested with Fisher's exact test:
+#   1. Are known genes more often significant than other genes?
+#   2. Are known genes over-represented among the top_n most significant genes?
 validate_known_genes <- function(res, known, top_n = 500) {
   res <- res[!is.na(res$padj), ]
   res <- res[order(res$padj, -abs(res$log2FC)), ]
@@ -23,12 +26,14 @@ validate_known_genes <- function(res, known, top_n = 500) {
     pct_other_significant = round(100 * mean(significant[!is_known]), 1),
     p_significant    = fisher.test(table(is_known, significant))$p.value,
     known_in_top     = sum(is_known & in_top),
+    # How many known genes we would expect in the top list by chance alone.
     expected_in_top  = round(top_n * mean(is_known), 1),
     p_top            = fisher.test(table(is_known, in_top))$p.value
   )
 }
 
 # Runs on every ranked table that exists in results/tables/.
+# Missing tables (for example before the Python step has run) are skipped.
 validate_all <- function(projects = c("TCGA-BRCA", "TCGA-LUAD"), top_n = 500) {
   known <- load_known_genes()
   methods <- c(DESeq2 = "_deseq2.csv", Python = "_ranked_genes.csv")
@@ -43,6 +48,7 @@ validate_all <- function(projects = c("TCGA-BRCA", "TCGA-LUAD"), top_n = 500) {
     }
   }
 
+  # One row per project and method; rounded so the CSV stays readable.
   summary <- do.call(rbind, rows)
   summary$p_significant <- signif(summary$p_significant, 3)
   summary$p_top <- signif(summary$p_top, 3)
