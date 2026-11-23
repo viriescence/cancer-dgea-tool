@@ -1,13 +1,16 @@
 # Run from the project root.
 #   Rscript run_all.R         uses the committed sample in data/sample/
 #   Rscript run_all.R --full  downloads full TCGA data (~10 GB), rebuilds the sample
-# Either way, writes the CSV files that python/dgea.py reads to data/processed/.
+# Writes the CSV files that python/dgea.py reads to data/processed/, plus the
+# DESeq2 table and volcano plot for each cancer to results/.
 
 if (!file.exists(file.path("R", "load_data.R"))) {
   stop("Run this script from the project root.")
 }
 
 source(file.path("R", "load_data.R"))
+source(file.path("R", "deseq2.R"))
+source(file.path("R", "plots.R"))
 
 PROJECTS <- c("TCGA-BRCA", "TCGA-LUAD")
 full <- "--full" %in% commandArgs(trailingOnly = TRUE)
@@ -20,6 +23,14 @@ for (project in PROJECTS) {
     data <- load_sample(project)
   }
   export_for_python(data)
+
+  res <- run_deseq2(data)
+  dir.create(file.path("results", "tables"), recursive = TRUE, showWarnings = FALSE)
+  write.csv(res, file.path("results", "tables", paste0(project, "_deseq2.csv")),
+            row.names = FALSE)
+  save_volcano(res,
+               file.path("results", "figures", paste0(project, "_deseq2_volcano.png")),
+               paste(project, "- DESeq2"))
 }
 
-message("Data ready in ", PROCESSED_DIR, ". Next: python python/dgea.py")
+message("Done. Python input in ", PROCESSED_DIR, "; DESeq2 results in results/.")
