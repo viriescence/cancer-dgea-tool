@@ -125,10 +125,19 @@ Rscript run_all.R --full
 2. It also writes `results/tables/<project>_deseq2.csv` and
    `results/figures/<project>_deseq2_volcano.png` (DESeq2, up/down at adjusted
    p < 0.05 and |log2 fold change| >= 1).
-3. Python analysis (`python/dgea.py`): reads the three files in
-   `data/processed/` and writes a ranked gene table and volcano plot per cancer
-   to `results/`. The run command and its outputs will be documented here when
-   the script is finished.
+3. Python analysis, from the project root:
+
+   ```bash
+   pip install -r python/requirements.txt
+   python3 python/dgea.py
+   ```
+
+   It reads the three files in `data/processed/` (committed, so R is not needed
+   for this step) and writes `results/tables/<project>_ranked_genes.csv` and
+   `results/figures/<project>_volcano_plot.png`. To run it without installing
+   anything, open
+   [`python/Cancer-Gene-Reg.ipynb`](https://colab.research.google.com/github/viriescence/cancer-dgea-tool/blob/main/python/Cancer-Gene-Reg.ipynb)
+   in Google Colab and choose Runtime > Run all.
 
 ## Methods
 
@@ -138,9 +147,9 @@ two ways on the same samples:
 - **DESeq2 (R, `R/deseq2.R`):** negative-binomial model on raw counts with
   design `~ group`, contrast tumor vs. normal, Benjamini-Hochberg adjusted
   p-values.
-- **Python (`python/dgea.py`):** log2 fold change, per-gene t-test and
-  multiple-testing correction on the log2 CPM values. The exact settings will
-  be listed here when the script is finished.
+- **Python (`python/dgea.py`):** log2 fold change as the difference of mean
+  log2 CPM between tumor and normal, Welch's two-sample t-test per gene, and
+  Benjamini-Hochberg correction across all genes.
 
 Genes are called up or down in tumor at adjusted p < 0.05 and
 |log2 fold change| >= 1.
@@ -159,8 +168,34 @@ tables are in `results/tables/` and the plots in `results/figures/`.
 ![BRCA volcano plot](results/figures/TCGA-BRCA_deseq2_volcano.png)
 ![LUAD volcano plot](results/figures/TCGA-LUAD_deseq2_volcano.png)
 
-The Python results, their comparison with DESeq2, and the check against known
-cancer genes will be added here once the Python analysis is complete.
+### Python (Welch t-test)
+
+Output of `python3 python/dgea.py` on the same samples.
+
+| Cancer | Genes tested | Up in tumor | Down in tumor | Top genes                   |
+|--------|-------------:|------------:|--------------:|-----------------------------|
+| BRCA   | 15,319       | 1,451       | 2,168         | MMP11, COL10A1, VEGFD, CA4  |
+| LUAD   | 15,539       | 1,547       | 2,297         | STX11, AGER, ITLN2, CAV1    |
+
+![BRCA volcano plot (Python)](results/figures/TCGA-BRCA_volcano_plot.png)
+![LUAD volcano plot (Python)](results/figures/TCGA-LUAD_volcano_plot.png)
+
+### Comparison of the two methods
+
+| Cancer | log2 fold change correlation | Top-500 genes in common | Called up by both | Called down by both |
+|--------|-----------------------------:|------------------------:|------------------:|--------------------:|
+| BRCA   | 0.93                         | 358                     | 1,393             | 1,586               |
+| LUAD   | 0.91                         | 274                     | 1,544             | 1,571               |
+
+The two methods agree on direction and size of change for most genes. They
+differ in which genes rank highest: DESeq2 models raw counts with a
+negative-binomial distribution, while the t-test works on log2 CPM and assumes
+roughly normal values. DESeq2 calls more genes up and fewer down than the
+t-test, and the overlap of the top 100 genes is 60 for BRCA and 30 for LUAD.
+Both methods rank known tumor-associated genes such as MMP11 and COL10A1
+(BRCA) near the top.
+
+Validation against a curated list of known cancer genes is not included.
 
 ## Contributions
 
