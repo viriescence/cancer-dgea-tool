@@ -2,8 +2,10 @@
 
 Differential gene expression analysis (DGEA) of tumor vs. normal tissue in two
 TCGA cancers: breast invasive carcinoma (BRCA) and lung adenocarcinoma (LUAD).
-The data pipeline is in R; the statistical analysis (log2 fold change, per-gene
-t-test, multiple-testing correction, ranked tables, volcano plots) is in Python.
+The data pipeline (cleaning, filtering, normalization) is in R. The analysis is
+done two ways and compared: DESeq2 in R, and log2 fold change with a per-gene
+Welch t-test and Benjamini-Hochberg correction in Python. Each produces a
+ranked gene table and a volcano plot per cancer.
 
 CS-123A term project. Team: Enzo Villar (data pipeline), Daniel Lopez (analysis).
 
@@ -45,6 +47,8 @@ run_all.R             entry point for the R pipeline
 R/load_data.R         download, label, filter, normalize, sample, export
 R/deseq2.R            DESeq2 differential expression (reference method)
 R/plots.R             volcano plot
+R/validate.R          enrichment of known cancer genes among significant genes
+run_validation.R      runs the validation on the tables in results/tables/
 python/dgea.py        differential expression analysis (Python)
 python/requirements.txt
 data/sample/          committed data: all normals + 150 tumors per cancer
@@ -195,7 +199,32 @@ t-test, and the overlap of the top 100 genes is 60 for BRCA and 30 for LUAD.
 Both methods rank known tumor-associated genes such as MMP11 and COL10A1
 (BRCA) near the top.
 
-Validation against a curated list of known cancer genes is not included.
+### Validation against known cancer genes
+
+As an independent check, we asked whether genes with known roles in cancer are
+more likely to be called significant than other genes. The reference list is the
+638 genes in CIViC (CC0; see `reference/README.md`). After running both
+analyses, `Rscript run_validation.R` writes
+`results/tables/known_gene_validation.csv`.
+
+| Cancer | Method | Known genes significant | Other genes significant | p (all genes) | Known genes in top 500 (expected 19) | p (top 500) |
+|--------|--------|------------------------:|------------------------:|--------------:|--------------------------------------:|------------:|
+| BRCA   | DESeq2 | 29.7%                   | 24.0%                   | 0.0018        | 29                                    | 0.033       |
+| BRCA   | Python | 28.6%                   | 23.4%                   | 0.0043        | 27                                    | 0.077       |
+| LUAD   | DESeq2 | 29.9%                   | 25.5%                   | 0.020         | 42                                    | 2.6e-6      |
+| LUAD   | Python | 28.9%                   | 24.6%                   | 0.018         | 31                                    | 0.0094      |
+
+Known cancer genes are modestly but consistently enriched among significant
+genes in both cancers and with both methods (Fisher's exact test). The
+enrichment among the 500 most significant genes is strongest for LUAD with
+DESeq2 and weakest for BRCA with the t-test, where it is not significant at
+0.05. Among the strongest known-gene hits are the cell-cycle genes PLK1, AURKA,
+PTTG1 and RRM2 in BRCA, and ETV4, TOP2A, BIRC5 and PLK1 in LUAD, all
+up-regulated in tumor.
+
+The effect is small because CIViC lists genes with clinical evidence across all
+cancer types, not drivers specific to breast or lung, and because about a
+quarter of all genes pass the significance thresholds in these large cohorts.
 
 ## Contributions
 
