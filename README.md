@@ -78,10 +78,34 @@ Preprocessing (`R/load_data.R`):
 random subset of 150 tumors per cancer (seed 123). It is small enough to commit
 and is what `Rscript run_all.R` uses by default.
 
+### Other cancers or your own data
+
+The pipeline is not tied to BRCA and LUAD. Any TCGA project with at least 3
+tumor and 3 normal samples works (for example `TCGA-COAD`, `TCGA-KIRC`,
+`TCGA-LIHC`; projects with almost no normal tissue, such as `TCGA-GBM`, cannot).
+
+```bash
+Rscript run_all.R TCGA-COAD
+```
+
+If `data/sample/` has no files for that project, the script downloads it from
+the GDC (needs `TCGAbiolinks` and `SummarizedExperiment`, see below), keeps all
+normals plus 150 random tumors, saves them to `data/sample/`, and runs the
+analysis on them. Several projects can be listed at once.
+
+To analyze a dataset that is not from TCGA, add three files to `data/sample/`
+using any name (here `mydata`) and run `Rscript run_all.R mydata`:
+
+| File                    | Contents                                                           |
+|-------------------------|--------------------------------------------------------------------|
+| `mydata_counts.csv.gz`  | raw integer counts, genes as rows, samples as columns, row names = gene IDs |
+| `mydata_groups.csv`     | columns `sample_id`, `group`; `group` is `tumor` or `normal`       |
+| `mydata_genes.csv`      | column `gene_id`; optional `gene_name`, `gene_type`                |
+
 ### Reproducing from the full TCGA data (optional)
 
-This downloads about 10 GB, needs an internet connection, and rebuilds
-`data/sample/` from scratch:
+This downloads about 10 GB per cancer, needs an internet connection, and
+rebuilds `data/sample/` from scratch (the analysis then runs on that sample):
 
 ```r
 BiocManager::install(c("TCGAbiolinks", "SummarizedExperiment"))
@@ -100,11 +124,25 @@ Rscript run_all.R --full
 2. It also writes `results/tables/<project>_deseq2.csv` and
    `results/figures/<project>_deseq2_volcano.png` (DESeq2, up/down at adjusted
    p < 0.05 and |log2 fold change| >= 1).
-3. Python analysis: _TODO (Daniel): command and expected outputs._
+3. Python analysis (`python/dgea.py`): reads the three files in
+   `data/processed/` and writes a ranked gene table and volcano plot per cancer
+   to `results/`. The run command and its outputs will be documented here when
+   the script is finished.
 
 ## Methods
 
-_TODO (Daniel): log2 fold change, test, multiple-testing correction, thresholds._
+Preprocessing is described under [Data](#data). Differential expression is run
+two ways on the same samples:
+
+- **DESeq2 (R, `R/deseq2.R`):** negative-binomial model on raw counts with
+  design `~ group`, contrast tumor vs. normal, Benjamini-Hochberg adjusted
+  p-values.
+- **Python (`python/dgea.py`):** log2 fold change, per-gene t-test and
+  multiple-testing correction on the log2 CPM values. The exact settings will
+  be listed here when the script is finished.
+
+Genes are called up or down in tumor at adjusted p < 0.05 and
+|log2 fold change| >= 1.
 
 ## Results
 
@@ -120,8 +158,8 @@ tables are in `results/tables/` and the plots in `results/figures/`.
 ![BRCA volcano plot](results/figures/TCGA-BRCA_deseq2_volcano.png)
 ![LUAD volcano plot](results/figures/TCGA-LUAD_deseq2_volcano.png)
 
-_TODO: Python results and comparison with DESeq2; validation against known
-cancer genes._
+The Python results, their comparison with DESeq2, and the check against known
+cancer genes will be added here once the Python analysis is complete.
 
 ## Contributions
 
