@@ -536,6 +536,7 @@ def compare_with_deseq2(welch_results, project):
                 "status_deseq2"
             ]
         ],
+    )
     # Remove genes without usable fold-change estimates.
     comparison = comparison[
         np.isfinite(comparison["log2FC_welch"]) &
