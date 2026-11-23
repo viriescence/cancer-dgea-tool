@@ -228,9 +228,9 @@ quarter of all genes pass the significance thresholds in these large cohorts.
 
 ## Contributions
 
-- **Enzo Villar:** dataset selection, data download and cleaning, sample
+- **EV:** dataset selection, data download and cleaning, sample
   labeling, filtering, normalization, repository and run script.
-- **Daniel Lopez:** differential expression analysis, ranked tables, volcano plots.
+- **DL:** differential expression analysis, ranked tables, volcano plots.
 - **Both:** validation against known cancer genes, README, presentation.
 
 ## License and data use
