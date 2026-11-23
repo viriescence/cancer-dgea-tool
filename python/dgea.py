@@ -817,4 +817,4 @@ if __name__ == "__main__":
         welch_results = analyze_project(project)
 
         # Compare welch_results against DESeq2
-        comparison, agreemnt table = compare_with_deseq2(welch_results, project)
+        comparison, agreemnt_table = compare_with_deseq2(welch_results, project)
