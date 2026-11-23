@@ -483,6 +483,10 @@ def compare_with_deseq2(welch_results, project):
 
     deseq2 = pd.read_csv(deseq2_path)
 
+    print("DESeq2 columns:")
+    print(deseq2.columns.tolist())
+    print(deseq2.head())
+
     # Make sure gene IDs have the same data type.
     deseq2["gene_id"] = deseq2["gene_id"].astype(str)
 
