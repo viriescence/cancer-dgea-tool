@@ -133,36 +133,109 @@ def analyze_project(project, data_dir=PROCESSED_DIR):
 def save_volcano(results, project):
     """Volcano plot: fold change on x, significance on y, coloured by status."""
     # Drop genes with no usable fold change or p-value.
-    plot_data = results[np.isfinite(results["log2FC"]) & np.isfinite(results["padj"])].copy()
+    plot_data = results[
+        np.isfinite(results["log2FC"]) &
+        np.isfinite(results["padj"])
+    ].copy()
+
     # The floor keeps -log10 finite when a p-value underflows to zero.
     plot_data["neg_log10_padj"] = -np.log10(
         plot_data["padj"].clip(lower=np.finfo(float).tiny)
     )
 
-    # One scatter layer per status so each gets its own colour and legend entry.
-    colors = {"ns": "lightgray", "up": "firebrick", "down": "royalblue"}
+    colors = {
+        "ns": "lightgray",
+        "up": "firebrick",
+        "down": "royalblue"
+    }
+
     fig, ax = plt.subplots(figsize=(8, 6))
+
+    # One scatter layer per status so each gets its own colour and legend entry.
     for status, color in colors.items():
         subset = plot_data[plot_data["status"] == status]
-        ax.scatter(subset["log2FC"], subset["neg_log10_padj"],
-                   color=color, s=10, alpha=0.6, label=status)
+
+        ax.scatter(
+            subset["log2FC"],
+            subset["neg_log10_padj"],
+            color=color,
+            s=10,
+            alpha=0.6,
+            label=status
+        )
 
     # Dashed lines mark the two thresholds.
     for x in (-LOG2FC_THRESHOLD, LOG2FC_THRESHOLD):
-        ax.axvline(x, color="black", linestyle="--", linewidth=1)
-    ax.axhline(-np.log10(FDR_THRESHOLD), color="black", linestyle="--", linewidth=1)
+        ax.axvline(
+            x,
+            color="black",
+            linestyle="--",
+            linewidth=1
+        )
 
-    ax.set_title(f"{project} - Python (Welch t-test, BH)")
-    ax.set_xlabel("log2 fold change (tumor vs. normal)")
-    ax.set_ylabel("-log10 adjusted p-value")
+    ax.axhline(
+        -np.log10(FDR_THRESHOLD),
+        color="black",
+        linestyle="--",
+        linewidth=1
+    )
+
+    # Label the 10 most significant up/down genes (the table is sorted by padj).
+    top_genes = plot_data[
+        plot_data["status"].isin(["up", "down"])
+    ].head(10)
+
+    for _, gene in top_genes.iterrows():
+        # Fall back to the Ensembl ID when a gene has no name.
+        label = gene["gene_name"]
+
+        if pd.isna(label):
+            label = gene["gene_id"]
+
+        ax.annotate(
+            label,
+            xy=(
+                gene["log2FC"],
+                gene["neg_log10_padj"]
+            ),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=8,
+            arrowprops={
+                "arrowstyle": "-",
+                "linewidth": 0.5
+            }
+        )
+
+    ax.set_title(
+        f"{project} - Python (Welch t-test, BH)"
+    )
+    ax.set_xlabel(
+        "log2 fold change (tumor vs. normal)"
+    )
+    ax.set_ylabel(
+        "-log10 adjusted p-value"
+    )
     ax.legend()
+
     fig.tight_layout()
 
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    FIGURES_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
     path = FIGURES_DIR / f"{project}_volcano_plot.png"
-    fig.savefig(path, dpi=150)
+
+    fig.savefig(
+        path,
+        dpi=150,
+        bbox_inches="tight"
+    )
+
     plt.close(fig)
     show_in_notebook(path)
+
     return path
 
 
