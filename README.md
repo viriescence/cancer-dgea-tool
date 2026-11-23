@@ -7,7 +7,7 @@ done two ways and compared: DESeq2 in R, and log2 fold change with a per-gene
 Welch t-test and Benjamini-Hochberg correction in Python. Each produces a
 ranked gene table and a volcano plot per cancer.
 
-CS-123A term project. Team: Enzo Villar (data pipeline), Daniel Lopez (analysis).
+CS-123A term project
 
 ## Quick start
 
