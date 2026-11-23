@@ -18,61 +18,174 @@ Writes:
     results/tables/<project>_ranked_genes.csv
     results/figures/<project>_volcano_plot.png
 """
-
+# sys is used to read optional project names from the command line
 import sys
+
+# Path provides cleaner and platform-independent file paths 
 from pathlib import Path
 
+# Matplotlib is used to create the volcano plots 
 import matplotlib
 
+# "Agg" allows matplotlib to create image files without requiring a 
+# graphical density. This is useful for running the script outside a notebook.
 matplotlib.use("Agg")  # draw to files only, so it works without a display
 import matplotlib.pyplot as plt
+
+# NumPy is used for numerical operations such as checking for
+# finite values and calculating -log10 adjusted p-values.
 import numpy as np
+
+# pandas is used to read, manipulate, merge, and save tabular data
 import pandas as pd
+
+# for welch's independent sample t-test
 from scipy.stats import ttest_ind
+
+# Used to perform Benjamimi-Hochberg multiple-testing correction
 from statsmodels.stats.multitest import multipletests
 
+# -------------------
+# File locations
+# -------------------
+
+# the analysis ready files from the R pre processing
 PROCESSED_DIR = Path("data") / "processed"
+
+# Ranked differential-expression tables are written and saved here
 TABLES_DIR = Path("results") / "tables"
+
+# Volcano plots are written and saved here
 FIGURES_DIR = Path("results") / "figures"
 
+# -------------------
+# File locations
+# -------------------
+
+# A gene must have an adjusted p-value below 0.05 to be
+# considered statistically significant.
 FDR_THRESHOLD = 0.05
+
+# |log2FC| >= 1 corresponds to at least a two-fold difference
+# in expression between tumor and normal samples.
 LOG2FC_THRESHOLD = 1.0
 
-
+# -------------------
+# Load input data
+# -------------------
 def load_inputs(project, data_dir=PROCESSED_DIR):
-    """Read the three files R exported and line up the group labels."""
+    """
+    Load the processed expression data, sample group labels, 
+    and gene annotations for one TCGA project.
+
+    Parameters 
+    -----------
+    project : str
+        TCGA project name, such as "TCGA-BRCA" or "TCGA-LUAD"
+
+    data_dir : Path
+        This is a directory containing the processed input files
+
+    Returns
+    ----------
+    expr : pandas.DataFrame
+        Gene expression matrix with genes as rows and samples as columns
+
+    group : panda.Series
+        Tumor/normal label for each sample, ordered to match the columns of the expression matrix.
+
+    genes : pandas.DataFrame
+        Gene annotation label containing gene ID's and names
+    """
+
+    # Load the log2-CPM expression matrix.
+    # Rows = genes 
+    # Columns = patient/sample ID's
     expr = pd.read_csv(data_dir / f"{project}_logcpm.csv.gz", index_col=0)
+
+    # Load the tumor/normal classification for each sample
+    # The sample ID is used as a DataFrame index.
+    # Columns = patient/sample IDs
     groups = pd.read_csv(data_dir / f"{project}_groups.csv", index_col=0)
+
+     # Load gene annotations, including readable gene names.
     genes = pd.read_csv(data_dir / f"{project}_genes.csv")
 
+    # Make sure sample IDs use the same string data type in 
+    # both the expression and group tables
     expr.columns = expr.columns.astype(str)
     groups.index = groups.index.astype(str)
 
-    # Every sample in the expression table must have a tumor/normal label.
+    # Find any expression samples that do not have a corresponding tumor/label
     missing = set(expr.columns) - set(groups.index)
+
+    # Stop the analysis if sample labels are missing
+    # Without a group label, we cannot determine whether a 
+    # Sample belongs to a the tumor or normal group
     if missing:
         raise ValueError(f"Missing group labels for samples: {sorted(missing)[:10]}")
 
-    # Put the labels in the same order as the expression columns.
+    # Reorder the group labels so they exactly match the column order of the expression matrix
     return expr, groups.loc[expr.columns, "group"], genes
 
 
+# ----------------------
+# Differential expression analysis
+# ----------------------
 def analyze_project(project, data_dir=PROCESSED_DIR):
-    """Run the full analysis for one project and save its table and plot."""
+    """
+    Perform differential gene expression analysis for one
+    TCGA cancer project.
+
+    Tumor and normal expression values are compared against 
+    Welch's t-test. P-values are corrected using the Benjamini-Hochberg
+    false discovery rate procedure.
+
+    Genes are classified as: 
+        up   = adjusted p < 0.05 and log2FC >= 1
+        down = adjusted p > 0.05 and log2FC <= -1
+        ns   = does not meet both criteria
+    """
+
+    # -------------
+    # Load the data
+    # -------------
     expr, group, genes = load_inputs(project, data_dir)
 
-    # Split the columns into the two groups being compared.
+    # -------------
+    # Separate the sample groups 
+    # -------------
+
+    # Select expression columns belonging to normal samples
     normal = expr.loc[:, (group == "normal").to_numpy()]
+
+    # Select expression columns belonging to tumor samples
     tumor = expr.loc[:, (group == "tumor").to_numpy()]
+
+    # Display basic information about the dataset
     print(f"{project}: {normal.shape[1]} normal, {tumor.shape[1]} tumor, "
           f"{expr.shape[0]} genes")
 
-    # The data is already log2, so a difference of means is a log2 fold change.
+    # -------------
+    # Calculate log2 fold change 
+    # -------------
+
+    # Calculate the average expression for every gene in normal and tumor samples
     mean_normal = normal.mean(axis=1)
     mean_tumor = tumor.mean(axis=1)
+
+    # The expression data is already in log2 scale, 
+    # so mean tumor and mean normal can be directly subtracted
+    # Positive values indicate high expression, negative indicates lower
     log2fc = mean_tumor - mean_normal
 
-    # One Welch t-test per gene (equal_var=False: no equal-variance assumption).
+    # --------------
+    # Welch's t-test
+    # --------------
+
+    # Perform an independent t-test per gene
+    # equal_var = False tells scipy not to assume that the tumor and normal variants have equal variances
+    # axis = 1 means each row(gene) receives its own test
     t_statistic, p_value = ttest_ind(
         tumor.to_numpy(dtype=float),
         normal.to_numpy(dtype=float),
@@ -80,12 +193,28 @@ def analyze_project(project, data_dir=PROCESSED_DIR):
         equal_var=False,
         nan_policy="omit",
     )
+
+    # If a NaN or infinite values are returned, replace the p-value with p = 1
+    # They'll get treated as nonsignificant rather than breaking later calculations
     p_value = np.nan_to_num(p_value, nan=1.0, posinf=1.0, neginf=1.0)
 
-    # Thousands of tests give false hits by chance; Benjamini-Hochberg controls
-    # the false discovery rate.
+    # -------------
+    # Multiple testing correction
+    # -------------
+
+    # Thousands of genes are tested simultaneously.
+    # Testing this many hypotheses increases the probability 
+    # of obtaining apparently significant results
+    # Benjamin Hochberg (BH) correction controls the false
+    # discovery rates (FDR)
     padj = multipletests(p_value, method="fdr_bh")[1]
 
+    # -------------
+    # Build results table
+    # -------------
+
+    # Create one more row per gene containing its fold change and
+    # statistical-test results
     results = pd.DataFrame({
         "gene_id": expr.index.astype(str),
         "log2FC": log2fc.to_numpy(),
@@ -93,62 +222,114 @@ def analyze_project(project, data_dir=PROCESSED_DIR):
         "padj": padj,
     })
 
-    # Add readable gene names.
+    # Convert gene IDs to strings so that they can be matched
+    # reliably between the results and annotation tables
     genes["gene_id"] = genes["gene_id"].astype(str)
+
+    # Add human readable gene names to the statistical results
     results = results.merge(
         genes[["gene_id", "gene_name"]].drop_duplicates("gene_id"),
         on="gene_id",
         how="left",
     )
 
-    # A gene must be both significant and changed by at least two-fold.
+    # ----------
+    # Classify differential expression
+    # ----------
+
+    # Determine which genes pass the FDR threshold
     significant = results["padj"] < FDR_THRESHOLD
+
+    # Start by classifying every gene as nonsignificant.
     results["status"] = "ns"
+
+    # Upregulated if statistically significant AND log2FC >= +1.
     results.loc[significant & (results["log2FC"] >= LOG2FC_THRESHOLD), "status"] = "up"
+
+    # Downregulated if statistically significant and log2FC <= -1
     results.loc[significant & (results["log2FC"] <= -LOG2FC_THRESHOLD), "status"] = "down"
 
-    # Rank by adjusted p-value, breaking ties by size of the change.
+    # -------------
+    # Rank genes
+    # -------------
+
+    # Temporarily calculate absolute fold change so that
+    # genes with equally significant adjusted p-values can be ranked by magnitude of their expression difference
     results = (
         results.assign(abs_log2FC=results["log2FC"].abs())
         .sort_values(["padj", "abs_log2FC"], ascending=[True, False])
         .drop(columns="abs_log2FC")
         .reset_index(drop=True)
     )
+
+    # Keep the final columns in a convenient order
     results = results[["gene_id", "gene_name", "log2FC", "p_value", "padj", "status"]]
 
+    # ------------
+    # Save the ranked gene table
+    # ------------
+
+    # Create the output directory if it does not already exist
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Construct the output filename
     table_path = TABLES_DIR / f"{project}_ranked_genes.csv"
+
+    # Save all ranked genes to CSV
     results.to_csv(table_path, index=False)
 
     # Quick summary for the console: counts per status and the top 10 genes.
     print(results["status"].value_counts().to_string())
+
+    # Print a quick summary to the console 
     print(results.head(10).to_string(index=False))
+
+    # Display the 10 highest ranked genes 
     print(f"Saved {table_path}")
 
+    # Create the volcano plot 
     figure_path = save_volcano(results, project)
     print(f"Saved {figure_path}")
+
+    # Return the full results so it can be used in python or a notebook
     return results
 
 
 def save_volcano(results, project):
-    """Volcano plot: fold change on x, significance on y, coloured by status."""
-    # Drop genes with no usable fold change or p-value.
+    """
+    Create and save a volcano plot
+    X-axis:
+        log2 fold change between tumor and normal samples
+    Y-axis:
+        -log10 adjusted p-value
+
+    Colors: 
+        Gray = not significant 
+        Red = upregulated
+        Blue = downregulated
+    """
+    # Remove genes with unusable fold change or adjusted
+    # p values before plotting
     plot_data = results[
         np.isfinite(results["log2FC"]) &
         np.isfinite(results["padj"])
     ].copy()
 
     # The floor keeps -log10 finite when a p-value underflows to zero.
+    # Smaller adjusted p-values therefore appear higher on volcano plots
+    # clip() prevents log(10), which would produce infinity
     plot_data["neg_log10_padj"] = -np.log10(
         plot_data["padj"].clip(lower=np.finfo(float).tiny)
     )
 
+    # Give a color to each differential expression category
     colors = {
         "ns": "lightgray",
         "up": "firebrick",
         "down": "royalblue"
     }
 
+    # Create the plotting area
     fig, ax = plt.subplots(figsize=(8, 6))
 
     # One scatter layer per status so each gets its own colour and legend entry.
@@ -164,7 +345,13 @@ def save_volcano(results, project):
             label=status
         )
 
-    # Dashed lines mark the two thresholds.
+    # -----------
+    # Draw Significance thresholds
+    # -----------
+    
+    # Dashed lines mark the two thresholds betwee log2FC = -1 and +1
+    #
+    # These correspond to the two fold expression change used to classify up/downregulated genes
     for x in (-LOG2FC_THRESHOLD, LOG2FC_THRESHOLD):
         ax.axvline(
             x,
@@ -172,7 +359,7 @@ def save_volcano(results, project):
             linestyle="--",
             linewidth=1
         )
-
+    # Horizontal line marks adjusted p = 0.05
     ax.axhline(
         -np.log10(FDR_THRESHOLD),
         color="black",
@@ -180,33 +367,49 @@ def save_volcano(results, project):
         linewidth=1
     )
 
+    # -------------
+    # Label top 10 genes
+    # -------------
+
     # Label the 10 most significant up/down genes (the table is sorted by padj).
+    # Keep only genes classified as significantly up or downregulated
+    # Because the results table was previously sorted by adjusted p value, head(10) 
+    # should select the 10 most significantly genes
     top_genes = plot_data[
         plot_data["status"].isin(["up", "down"])
     ].head(10)
 
+    # Add the gene name besides each selected point 
     for _, gene in top_genes.iterrows():
-        # Fall back to the Ensembl ID when a gene has no name.
+        # Use the human readable gene symbol when available
         label = gene["gene_name"]
 
+        # Fall back to the ensemble gene ID if no gene name is available
         if pd.isna(label):
             label = gene["gene_id"]
 
         ax.annotate(
             label,
+            # location of the gene's point
             xy=(
                 gene["log2FC"],
                 gene["neg_log10_padj"]
             ),
+            # Move text away from the point
             xytext=(5, 5),
             textcoords="offset points",
             fontsize=8,
+            # Draw a small line connecting the label to
+            # its corresponding gene.
             arrowprops={
                 "arrowstyle": "-",
                 "linewidth": 0.5
             }
         )
 
+    # ----------
+    # Plot formatting
+    # ----------
     ax.set_title(
         f"{project} - Python (Welch t-test, BH)"
     )
@@ -216,44 +419,67 @@ def save_volcano(results, project):
     ax.set_ylabel(
         "-log10 adjusted p-value"
     )
+
+    # display the ns/up/down legend
     ax.legend()
 
+    # automatically adjust spacing so labels and axes fit 
     fig.tight_layout()
 
+    # -----------------------------
+    # Save volcano plot
+    # -----------------------------
+    
+    # Create the figure directory if necessary
     FIGURES_DIR.mkdir(
         parents=True,
         exist_ok=True
     )
 
+    # Construct the output filename
     path = FIGURES_DIR / f"{project}_volcano_plot.png"
 
+    # Save the figure as a PNG
     fig.savefig(
         path,
         dpi=150,
         bbox_inches="tight"
     )
 
+    # close the matplotlib figure
     plt.close(fig)
+
+    # if ran on colab or jupyter, display the notebook
     show_in_notebook(path)
 
+    
     return path
 
 
 def show_in_notebook(path):
-    """Display the saved plot when running in Colab or Jupyter; no-op otherwise."""
+    """
+    Display the saved plot when running in Colab or Jupyter.
+    When ran from terminal, this won't do anything
+    """
+    # IPython is usually available with jupyter or colab, but can't run from terminal
     try:
         from IPython import get_ipython
         from IPython.display import Image, display
     except ImportError:
         return
+    # only displays the image when an IPython environment is actually active
     if get_ipython() is not None:
         display(Image(filename=str(path)))
 
-
+# ------------
+# 
+# ------------
 if __name__ == "__main__":
     # Notebook kernels (Colab, Jupyter) add their own flags; ignore those.
     projects = [a for a in sys.argv[1:]
                 if not a.startswith("-") and not a.endswith(".json")]
+    # If no projects were explicitly provided, analyze breast cancer (BRCA) and Lung cancer (LUAD)
     projects = projects or ["TCGA-BRCA", "TCGA-LUAD"]
+    # Run the analysis independently for each project
     for project in projects:
         analyze_project(project)
