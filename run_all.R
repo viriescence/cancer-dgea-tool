@@ -3,7 +3,7 @@
 #   Rscript run_all.R TCGA-COAD ...    any TCGA project (or your own dataset in
 #                                      data/sample/, see README); downloads and
 #                                      samples it first if no sample exists
-#   Rscript run_all.R --full           rebuild the sample(s) from TCGA (~10 GB each)
+#   Rscript run_all.R --full           rebuild the sample(s) from TCGA (around 10 GB each)
 # Writes the CSV files that python/dgea.py reads to data/processed/, plus the
 # DESeq2 table and volcano plot for each project to results/.
 
