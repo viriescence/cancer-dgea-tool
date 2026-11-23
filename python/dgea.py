@@ -508,12 +508,12 @@ def compare_with_deseq2(welch_results, project):
     #
     # Rename them so it is obvious which method they came from.
     deseq2 = deseq2.rename(
-        columns={
-            "log2FoldChange": "log2FC_deseq2",
-            "pvalue": "p_value_deseq2",
-            "padj": "padj_deseq2"
-        }
-    )
+    columns={
+        "log2FoldChange": "log2FC_deseq2",
+        "pvalue": "p_value_deseq2",
+        "padj": "padj_deseq2"
+    }
+)
 
     # Rename the corresponding Welch columns.
     welch = welch_results.rename(
